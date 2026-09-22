@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:,">
+  <title>快速入库实时流</title>
+  <style>
+    :root {
+      --page: #f6f7f9;
+      --surface: #ffffff;
+      --surface-soft: #f0f2f5;
+      --text: #20242a;
+      --muted: #626b77;
+      --line: #dfe3e8;
+      --focus: #0b63ce;
+      --purple-bg: #f0e8ff;
+      --purple: #8257e5;
+      --green-bg: #e3f5ea;
+      --green: #21945a;
+      --blue-bg: #e8f0ff;
+      --blue: #3d73e7;
+      --chip-pending-bg: #fff4ce;
+      --chip-pending: #6d5200;
+      --chip-needs-bg: #ffe7e5;
+      --chip-needs: #9a2b23;
+      --chip-neutral-bg: #e7ebf0;
+      --chip-neutral: #46515e;
+      --live: #167447;
+      --stale: #9a5b00;
+      --offline: #9a2b23;
+      --shadow: 0 1px 2px rgb(22 29 37 / 7%);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #17191d;
+        --surface: #23262c;
+        --surface-soft: #1d2025;
+        --text: #f2f4f7;
+        --muted: #aeb5bf;
+        --line: #3a3f48;
+        --focus: #8fc2ff;
+        --purple-bg: #33284a;
+        --purple: #b698ff;
+        --green-bg: #203d2e;
+        --green: #58cf8b;
+        --blue-bg: #253550;
+        --blue: #79a4ff;
+        --chip-pending-bg: #463b18;
+        --chip-pending: #f0d36c;
+        --chip-needs-bg: #4a2524;
+        --chip-needs: #ff9d96;
+        --chip-neutral-bg: #343941;
+        --chip-neutral: #c6ccd4;
+        --live: #65d89a;
+        --stale: #efbf5a;
+        --offline: #ff9d96;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    button, summary { font: inherit; }
+    button:focus-visible, summary:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
+    }
+    .shell {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 22px clamp(16px, 2.8vw, 42px) 42px;
+    }
+    .page-header {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(25px, 2.4vw, 36px);
+      font-weight: 760;
+      letter-spacing: -.035em;
+      line-height: 1.12;
+    }
+    .scope-note {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .live-bar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(max-content, 1fr)) auto;
+      gap: 0;
+      align-items: stretch;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .live-cell {
+      min-width: 0;
+      padding: 9px 14px;
+      border-right: 1px solid var(--line);
+    }
+    .live-label {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .06em;
+    }
+    .live-value {
+      display: block;
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+      font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+    .connection-value {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      font-family: inherit;
+      font-weight: 750;
+    }
+    .connection-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .live-bar[data-state="connected"] .connection-value { color: var(--live); }
+    .live-bar[data-state="connecting"] .connection-value,
+    .live-bar[data-state="stale"] .connection-value { color: var(--stale); }
+    .live-bar[data-state="offline"] .connection-value { color: var(--offline); }
+    .refresh-button {
+      min-width: 112px;
+      min-height: 44px;
+      padding: 9px 16px;
+      border: 0;
+      border-radius: 0;
+      background: var(--text);
+      color: var(--surface);
+      cursor: pointer;
+      font-weight: 750;
+    }
+    .refresh-button:hover { opacity: .88; }
+    .refresh-button:disabled { cursor: wait; opacity: .55; }
+    .refresh-result {
+      min-height: 20px;
+      margin: 5px 2px 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      padding-top: 10px;
+    }
+    .subject-column {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .column-header {
+      position: relative;
+      padding: 15px 16px 13px;
+      border-bottom: 1px solid var(--line);
+    }
+    .subject-408 .column-header { background: var(--purple-bg); border-top: 4px solid var(--purple); }
+    .subject-math .column-header { background: var(--green-bg); border-top: 4px solid var(--green); }
+    .subject-english .column-header { background: var(--blue-bg); border-top: 4px solid var(--blue); }
+    .column-header h2 {
+      margin: 0;
+      padding-right: 72px;
+      font-size: 17px;
+      line-height: 1.35;
+    }
+    .column-header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .item-count {
+      position: absolute;
+      top: 15px;
+      right: 14px;
+      padding: 3px 7px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+      font-size: 10px;
+    }
+    .timeline {
+      position: relative;
+      padding: 16px 14px 18px 31px;
+    }
+    .timeline::before {
+      position: absolute;
+      top: 18px;
+      bottom: 20px;
+      left: 19px;
+      width: 1px;
+      background: var(--line);
+      content: "";
+    }
+    .timeline-card {
+      position: relative;
+      margin: 0 0 12px;
+      padding: 13px 13px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+    }
+    .timeline-card:last-child { margin-bottom: 0; }
+    .timeline-dot {
+      position: absolute;
+      top: 18px;
+      left: -18px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid var(--surface);
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 1px var(--line);
+    }
+    .subject-408 .timeline-dot { color: var(--purple); }
+    .subject-math .timeline-dot { color: var(--green); }
+    .subject-english .timeline-dot { color: var(--blue); }
+    .capture-time {
+      margin: 0 0 3px;
+      color: var(--muted);
+      font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+      font-size: 11px;
+    }
+    .timeline-card h3 {
+      margin: 0 0 8px;
+      overflow-wrap: anywhere;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .status-chip, .residual-state {
+      display: inline-flex;
+      min-height: 26px;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .status-pending, .status-pending_start, .status-retry_failed,
+    .status-resume, .status-legacy_migration {
+      background: var(--chip-pending-bg);
+      color: var(--chip-pending);
+    }
+    .status-needs_user, .status-archive_pending, .status-failed, .status-damaged {
+      background: var(--chip-needs-bg);
+      color: var(--chip-needs);
+    }
+    .status-unknown, .residual-state { background: var(--chip-neutral-bg); color: var(--chip-neutral); }
+    details { margin-top: 7px; border-radius: 5px; }
+    summary {
+      display: flex;
+      min-height: 44px;
+      align-items: center;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: minmax(78px, auto) minmax(0, 1fr);
+      gap: 5px 10px;
+      margin: 0 0 5px;
+      padding: 10px;
+      background: var(--surface-soft);
+      font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+      font-size: 11px;
+    }
+    dt { color: var(--muted); }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .empty-state {
+      position: relative;
+      min-height: 132px;
+      padding: 24px 18px;
+      border: 1px dashed var(--line);
+      border-radius: 9px;
+      background: var(--surface-soft);
+    }
+    .empty-state p { margin: 0 0 8px; font-weight: 700; }
+    .empty-state span { color: var(--muted); font-size: 12px; }
+    .footer {
+      margin-top: 22px;
+      padding-top: 15px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (max-width: 1440px) {
+      .shell { width: 100%; }
+    }
+    @media (max-width: 1024px) {
+      .shell { padding-right: 20px; padding-left: 20px; }
+      .board { gap: 12px; }
+      .column-header { padding-right: 13px; padding-left: 13px; }
+    }
+    @media (max-width: 768px) {
+      .page-header { align-items: flex-start; }
+      .live-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .refresh-button { grid-column: 1 / -1; width: 100%; border-top: 1px solid var(--line); }
+      .board { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .shell { padding: 18px 12px 34px; }
+      .page-header { display: block; }
+      .scope-note { margin-bottom: 12px; }
+      .live-bar { grid-template-columns: 1fr 1fr; }
+      .live-cell { border-bottom: 1px solid var(--line); }
+      .live-cell:nth-child(2) { border-right: 0; }
+      .live-cell:nth-child(3) { grid-column: 1 / -1; border-right: 0; }
+      .refresh-result { text-align: left; }
+      .board { gap: 14px; padding-top: 8px; }
+      .column-header { padding: 14px 13px 12px; }
+      .timeline { padding-right: 10px; }
+    }
+    @media (max-width: 390px) {
+      h1 { font-size: 25px; }
+      .live-bar { grid-template-columns: 1fr; }
+      .live-cell, .live-cell:nth-child(2), .live-cell:nth-child(3) { grid-column: auto; border-right: 0; }
+      .column-header h2 { padding-right: 62px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+        animation: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="page-header">
+      <div>
+        <h1>快速入库实时流</h1>
+        <p class="scope-note">按捕获时间展示三科全部未正式入库项目</p>
+      </div>
+    </header>
+
+    <section class="live-bar" id="live-status" data-state="connecting" aria-label="实时连接状态">
+      <div class="live-cell">
+        <span class="live-label">连接状态</span>
+        <span class="live-value connection-value" id="connection-status" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connection-text">正在连接</span>
+        </span>
+      </div>
+      <div class="live-cell">
+        <span class="live-label">最后更新</span>
+        <time class="live-value" id="last-updated">尚无数据</time>
+      </div>
+      <div class="live-cell">
+        <span class="live-label">自动更新频率</span>
+        <span class="live-value" id="update-frequency">约 1 秒自动检查</span>
+      </div>
+      <button class="refresh-button" id="refresh-now" type="button">立即刷新</button>
+    </section>
+    <p class="refresh-result" id="refresh-result" role="status" aria-live="polite"></p>
+
+    <div class="board" id="board" aria-label="408、数学、英语未正式入库时间轴">
+      <section class="subject-column subject-408" data-subject="408" aria-labelledby="heading-408">
+        <header class="column-header">
+          <h2 id="heading-408">408</h2>
+          <p id="summary-408">等待首次数据</p>
+          <span class="item-count" id="count-408">0 项</span>
+        </header>
+        <div class="timeline" id="timeline-408"><div class="empty-state"><p>正在读取</p><span>连接建立后将显示未正式入库项目。</span></div></div>
+      </section>
+      <section class="subject-column subject-math" data-subject="math" aria-labelledby="heading-math">
+        <header class="column-header">
+          <h2 id="heading-math">数学</h2>
+          <p id="summary-math">等待首次数据</p>
+          <span class="item-count" id="count-math">0 项</span>
+        </header>
+        <div class="timeline" id="timeline-math"><div class="empty-state"><p>正在读取</p><span>连接建立后将显示未正式入库项目。</span></div></div>
+      </section>
+      <section class="subject-column subject-english" data-subject="english" aria-labelledby="heading-english">
+        <header class="column-header">
+          <h2 id="heading-english">英语</h2>
+          <p id="summary-english">等待首次数据</p>
+          <span class="item-count" id="count-english">0 项</span>
+        </header>
+        <div class="timeline" id="timeline-english"><div class="empty-state"><p>正在读取</p><span>连接建立后将显示未正式入库项目。</span></div></div>
+      </section>
+    </div>
+
+    <footer class="footer">页面只展示安全短标题与状态元数据，不包含完整题干、解析、答案、英语全文或私密对话。</footer>
+  </main>
+
+  <script type="application/json" id="snapshot-data">{"subjects":{},"study_date":"","generated_at":"","public_empty_template":true}</script>
+  <script>
+    (() => {
+      if (window.location.protocol === 'file:') {
+        window.location.replace('http://127.0.0.1:8767/');
+        return;
+      }
+
+      const SUBJECT_ORDER = ['408', 'math', 'english'];
+      const SUBJECT_NAMES = { '408': '408', math: '数学', english: '英语' };
+      const TERMINAL_STATES = new Set(['formalized', 'archived', 'committed', 'closed']);
+      const STATUS_LABELS = {
+        waiting_web_review: '已保存·待网页处理',
+        pending: '等待正式入库',
+        pending_start: '等待开始正式入库',
+        retry_failed: '失败后可安全重试',
+        resume: '恢复既有事务',
+        legacy_migration: '可迁移历史证据',
+        legacy_archive_pending: '待归档历史证据',
+        needs_user: '需要用户确认',
+        archive_pending: '等待完成归档',
+        damaged: '证据损坏，待修复',
+        failed: '处理失败，待修复',
+        unknown: '状态待核对'
+      };
+      const connectionBar = document.getElementById('live-status');
+      const connectionText = document.getElementById('connection-text');
+      const lastUpdated = document.getElementById('last-updated');
+      const updateFrequency = document.getElementById('update-frequency');
+      const refreshButton = document.getElementById('refresh-now');
+      const refreshResult = document.getElementById('refresh-result');
+      const embedded = document.getElementById('snapshot-data');
+      let lastKnownGood = null;
+      let renderSignature = '';
+      let stream = null;
+      let reconnectTimer = null;
+      let reconnectDelay = 1000;
+
+      const text = (tag, className, value) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        node.textContent = value == null || value === '' ? '未记录' : String(value);
+        return node;
+      };
+
+      const setConnection = (state, label) => {
+        connectionBar.dataset.state = state;
+        connectionText.textContent = label;
+      };
+
+      const unwrapSnapshot = (payload) => {
+        if (!payload || typeof payload !== 'object') return null;
+        if (payload.snapshot && typeof payload.snapshot === 'object') return payload.snapshot;
+        if (payload.data && payload.data.subjects) return payload.data;
+        return payload;
+      };
+
+      const safeItems = (snapshot, subject) => {
+        const projection = snapshot && snapshot.subjects && snapshot.subjects[subject];
+        const items = projection && Array.isArray(projection.items) ? projection.items : [];
+        return items.filter((item) => {
+          const state = String(item && (item.display_status || item.process_status) || 'unknown').toLowerCase();
+          return !TERMINAL_STATES.has(state);
+        });
+      };
+
+      const snapshotIsDegraded = (snapshot) => Boolean(
+        snapshot && snapshot.projection_errors
+        && Object.keys(snapshot.projection_errors).length
+      );
+
+      const itemKey = (subject, item, index) => String(
+        item.subject_item_key || item.capture_id || item.package_id || `${subject}-${index}`
+      );
+
+      const shortValue = (value) => {
+        const raw = String(value || '');
+        if (!raw) return '未记录';
+        return raw.length <= 28 ? raw : `${raw.slice(0, 14)}…${raw.slice(-9)}`;
+      };
+
+      const timeLabel = (value) => {
+        if (!value) return '时间未记录';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return String(value);
+        return new Intl.DateTimeFormat('zh-CN', {
+          timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', hour12: false
+        }).format(parsed);
+      };
+
+      const processState = (item) => String(
+        item.process_status || item.processing_status || item.display_status || item.source_status || 'unknown'
+      ).toLowerCase();
+
+      const residualState = (item) => {
+        const explicit = item.residual_status || item.residual_state;
+        if (explicit) return String(explicit);
+        const state = processState(item);
+        if (state === 'waiting_web_review') return '等待网页处理';
+        if (state === 'needs_user') return '需要用户确认';
+        if (state === 'legacy_archive_pending') return '历史原始证据尚未归档';
+        if (state === 'archive_pending') return '归档尚未完成';
+        if (state === 'retry_failed') return '需要重新编纂';
+        if (state === 'resume') return '继续既有事务';
+        if (state === 'failed') return '处理失败待修复';
+        if (item.queue_class === 'residual') return `待处理：${shortValue(state)}`;
+        return '无已知残留';
+      };
+
+      const metadataRow = (list, label, value) => {
+        list.append(text('dt', '', label), text('dd', '', shortValue(value)));
+      };
+
+      const buildCard = (subject, item, index, expandedKeys) => {
+        const card = document.createElement('article');
+        card.className = 'timeline-card';
+        const key = itemKey(subject, item, index);
+        card.dataset.itemKey = key;
+        const dot = document.createElement('span');
+        dot.className = 'timeline-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        card.append(dot);
+        card.append(text(
+          'p',
+          'capture-time',
+          item.captured_at ? timeLabel(item.captured_at) : `学习日 ${item.study_date || '未记录'}`
+        ));
+        card.append(text('h3', '', item.safe_title || `${SUBJECT_NAMES[subject]} 项目`));
+
+        const status = processState(item);
+        const statusRow = document.createElement('div');
+        statusRow.className = 'status-row';
+        const processChip = text('span', `status-chip status-${STATUS_LABELS[status] ? status : 'unknown'}`,
+          `处理状态：${STATUS_LABELS[status] || shortValue(status)}`);
+        const residualChip = text('span', 'residual-state', `残留状态：${residualState(item)}`);
+        statusRow.append(processChip, residualChip);
+        card.append(statusRow);
+
+        const details = document.createElement('details');
+        details.dataset.itemKey = key;
+        details.open = expandedKeys.has(key);
+        const summary = text('summary', '', '查看安全元数据');
+        summary.setAttribute('aria-label', `展开 ${item.safe_title || SUBJECT_NAMES[subject]} 的安全元数据`);
+        const list = document.createElement('dl');
+        metadataRow(list, '学习日期', item.study_date);
+        metadataRow(list, 'Capture', item.capture_id);
+        metadataRow(list, 'Package', item.package_id);
+        metadataRow(list, 'Package SHA', item.package_sha256);
+        metadataRow(list, '来源状态', item.source_status);
+        const counts = item.attachment_counts && typeof item.attachment_counts === 'object'
+          ? Object.values(item.attachment_counts).reduce((sum, count) => sum + (Number(count) || 0), 0)
+          : 0;
+        metadataRow(list, '附件数', counts);
+        metadataRow(list, '时间质量', item.time_quality);
+        details.append(summary, list);
+        card.append(details);
+        return card;
+      };
+
+      const captureViewState = () => ({
+        pageX: window.scrollX,
+        pageY: window.scrollY,
+        expandedKeys: new Set(
+          Array.from(document.querySelectorAll('details[data-item-key][open]'))
+            .map((node) => node.dataset.itemKey)
+        ),
+        timelineScroll: Object.fromEntries(
+          SUBJECT_ORDER.map((subject) => [subject, document.getElementById(`timeline-${subject}`).scrollTop])
+        )
+      });
+
+      const restoreViewState = (viewState) => {
+        requestAnimationFrame(() => {
+          SUBJECT_ORDER.forEach((subject) => {
+            document.getElementById(`timeline-${subject}`).scrollTop = viewState.timelineScroll[subject] || 0;
+          });
+          window.scrollTo({ left: viewState.pageX, top: viewState.pageY, behavior: 'auto' });
+        });
+      };
+
+      const render = (payload) => {
+        if (payload && payload.status === 'stale') {
+          if (payload.snapshot) render(payload.snapshot);
+          setConnection('stale', '重连中 · 数据可能陈旧');
+          return true;
+        }
+        const snapshot = unwrapSnapshot(payload);
+        if (!snapshot || !snapshot.subjects) throw new Error('snapshot_missing_subjects');
+        const signature = JSON.stringify(SUBJECT_ORDER.map((subject) => ({
+          items: safeItems(snapshot, subject),
+          freshness: (snapshot.subjects[subject] || {}).freshness || null
+        })));
+        const changed = signature !== renderSignature;
+        if (changed) {
+          const viewState = captureViewState();
+          SUBJECT_ORDER.forEach((subject) => {
+            const items = safeItems(snapshot, subject);
+            const projection = snapshot.subjects[subject] || {};
+            const counts = projection.counts || {};
+            const freshness = projection.freshness || { status: 'fresh' };
+            const timeline = document.getElementById(`timeline-${subject}`);
+            const fragment = document.createDocumentFragment();
+            if (items.length) {
+              items.forEach((item, index) => fragment.append(buildCard(subject, item, index, viewState.expandedKeys)));
+            } else {
+              const empty = document.createElement('div');
+              empty.className = 'empty-state';
+              if (freshness.status === 'unavailable') {
+                empty.append(text('p', '', '当前无法读取该科目状态'));
+                empty.append(text('span', '', '已隔离故障；其他科目继续实时更新。'));
+              } else {
+                empty.append(text('p', '', '暂无未正式入库项目'));
+                empty.append(text('span', '', freshness.status === 'stale'
+                  ? '当前显示最后一次可信结果。'
+                  : '新捕获到达后会自动出现在这里。'));
+              }
+              fragment.append(empty);
+            }
+            timeline.replaceChildren(fragment);
+            const processableCount = Number.isFinite(Number(counts.processable_count))
+              ? Number(counts.processable_count)
+              : items.filter((item) => item.queue_class === 'processable').length;
+            const residualCount = Number.isFinite(Number(counts.residual_count))
+              ? Number(counts.residual_count)
+              : items.filter((item) => item.queue_class === 'residual').length;
+            const statusCounts = counts.status_counts && typeof counts.status_counts === 'object'
+              ? counts.status_counts
+              : {};
+            const legacyArchiveCount = Number.isFinite(Number(statusCounts.legacy_archive_pending))
+              ? Number(statusCounts.legacy_archive_pending)
+              : items.filter((item) => processState(item) === 'legacy_archive_pending').length;
+            const otherResidualCount = Math.max(0, residualCount - legacyArchiveCount);
+            const waitingWebCount = Number(statusCounts.waiting_web_review || 0);
+            const archiveCount = legacyArchiveCount + Number(statusCounts.archive_pending || 0);
+            const needsUserCount = Number(statusCounts.needs_user || 0);
+            const englishOtherCount = Math.max(0, residualCount - archiveCount - needsUserCount);
+            document.getElementById(`count-${subject}`).textContent =
+              subject === 'english'
+                ? `${items.length} 个会话包/事件 · ${waitingWebCount} 待网页处理`
+                : `${processableCount} 待入库 · ${legacyArchiveCount} 待归档`;
+            document.getElementById(`summary-${subject}`).textContent =
+              (subject === 'english'
+                ? `已保存·待网页处理 ${waitingWebCount} · 待本地正式入库 ${processableCount} · 待归档 ${archiveCount} · 需确认 ${needsUserCount}`
+                  + (englishOtherCount ? ` · 其他待处理 ${englishOtherCount}` : '')
+                : `待正式入库 ${processableCount} · 待归档历史证据 ${legacyArchiveCount} · 其他残留 ${otherResidualCount}`)
+              + (freshness.status === 'stale' ? ' · 数据陈旧' : '')
+              + (freshness.status === 'unavailable' ? ' · 数据不可用' : '');
+          });
+          renderSignature = signature;
+          restoreViewState(viewState);
+        }
+
+        lastKnownGood = snapshot;
+        const generatedAt = snapshot.generated_at || payload.generated_at || new Date().toISOString();
+        lastUpdated.dateTime = generatedAt;
+        lastUpdated.textContent = timeLabel(generatedAt);
+        const seconds = Number(
+          payload.refresh_interval_seconds || payload.auto_update_seconds || snapshot.refresh_interval_seconds
+        );
+        updateFrequency.textContent = seconds > 0 ? `${seconds} 秒自动检查 + 实时推送` : '约 1 秒自动检查 + 实时推送';
+        return snapshotIsDegraded(snapshot);
+      };
+
+      const scheduleReconnect = () => {
+        if (reconnectTimer) return;
+        setConnection('stale', `重连中（${Math.round(reconnectDelay / 1000)} 秒）· 数据可能陈旧`);
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = null;
+          connectStream();
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      };
+
+      const connectStream = () => {
+        if (stream) stream.close();
+        setConnection('connecting', lastKnownGood ? '重连中 · 数据可能陈旧' : '正在连接实时流');
+        stream = new EventSource('/api/stream');
+        stream.addEventListener('open', () => {
+          reconnectDelay = 1000;
+          setConnection(
+            snapshotIsDegraded(lastKnownGood) ? 'stale' : 'connected',
+            snapshotIsDegraded(lastKnownGood) ? '已连接 · 部分科目数据陈旧' : '已连接 · 实时更新'
+          );
+        });
+        const handleSnapshot = (event) => {
+          try {
+            const degraded = render(JSON.parse(event.data));
+            setConnection(
+              degraded ? 'stale' : 'connected',
+              degraded ? '已连接 · 部分科目数据陈旧' : '已连接 · 实时更新'
+            );
+          } catch (_) {
+            refreshResult.textContent = '收到无法读取的更新；已保留上一份可用数据。';
+          }
+        };
+        stream.addEventListener('snapshot', handleSnapshot);
+        stream.addEventListener('message', handleSnapshot);
+        stream.addEventListener('heartbeat', (event) => {
+          try {
+            const heartbeat = JSON.parse(event.data);
+            if (heartbeat.status === 'stale') {
+              setConnection('stale', '已连接 · 数据可能陈旧');
+            }
+          } catch (_) {}
+        });
+        stream.addEventListener('error', (event) => {
+          if (event && typeof event.data === 'string' && event.data) {
+            try {
+              render(JSON.parse(event.data));
+              setConnection('stale', '已连接 · 数据可能陈旧');
+              return;
+            } catch (_) {}
+          }
+          stream.close();
+          stream = null;
+          scheduleReconnect();
+        });
+      };
+
+      const loadInitialSnapshot = async () => {
+        try {
+          const response = await fetch('/api/snapshot', { method: 'GET', cache: 'no-store' });
+          if (!response.ok) throw new Error(`snapshot_http_${response.status}`);
+          const degraded = render(await response.json());
+          if (degraded) setConnection('stale', '已连接 · 部分科目数据陈旧');
+        } catch (_) {
+          try {
+            render(JSON.parse(embedded.textContent));
+            setConnection('stale', '重连中 · 数据可能陈旧');
+          } catch (_) {
+            setConnection('offline', '暂无可用数据 · 正在重连');
+          }
+        }
+      };
+
+      refreshButton.addEventListener('click', async () => {
+        refreshButton.disabled = true;
+        refreshResult.textContent = '正在刷新三科状态…';
+        try {
+          const response = await fetch('/api/refresh', { method: 'POST' });
+          const payload = await response.json();
+          const degraded = render(payload);
+          if (!response.ok && !payload.snapshot) throw new Error(`refresh_http_${response.status}`);
+          refreshResult.textContent = degraded ? '已刷新；部分科目仍显示最后可信结果。' : '已刷新。';
+        } catch (_) {
+          refreshResult.textContent = '刷新未完成；已保留上一份可用数据。';
+          if (lastKnownGood) setConnection('stale', '重连中 · 数据可能陈旧');
+        } finally {
+          refreshButton.disabled = false;
+        }
+      });
+
+      loadInitialSnapshot().finally(connectStream);
+    })();
+  </script>
+</body>
+</html>
